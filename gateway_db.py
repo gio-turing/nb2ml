@@ -1,554 +1,317 @@
 """
-GatewayDB - Stripe API Gateway Database Class with Pydantic Models
-Encapsulates all Stripe API operations for payment processing and management
+GatewayDB - Pydantic BaseModel for Stripe entity collections
+Contains all Stripe entities as attributes
 """
 
-from typing import Any, Dict
-import stripe
-from models import (
-    GatewayDBConfig,
-    CreateCouponParams,
-    ListCouponsParams,
-    CreateCustomerParams,
-    ListCustomersParams,
-    ListDisputesParams,
-    UpdateDisputeParams,
-    CreateInvoiceParams,
-    CreateInvoiceItemParams,
-    FinalizeInvoiceParams,
-    ListInvoicesParams,
-    CreatePaymentLinkParams,
-    ListPaymentIntentsParams,
-    CreatePriceParams,
-    ListPricesParams,
-    CreateProductParams,
-    ListProductsParams,
-    CreateRefundParams,
-    CancelSubscriptionParams,
-    ListSubscriptionsParams,
-    UpdateSubscriptionParams,
-    SearchStripeResourcesParams,
-    FetchStripeResourceParams,
-    SearchStripeDocumentationParams,
+from typing import Optional, List, Dict
+from pydantic import BaseModel, Field, ConfigDict
+from entities import (
+    AccountEntity,
+    BalanceEntity,
+    CouponEntity,
+    CustomerEntity,
+    DisputeEntity,
+    InvoiceEntity,
+    InvoiceItemEntity,
+    PaymentLinkEntity,
+    PaymentIntentEntity,
+    PriceEntity,
+    ProductEntity,
+    RefundEntity,
+    SubscriptionEntity,
 )
 
 
-class GatewayDB:
+class GatewayDB(BaseModel):
     """
-    GatewayDB - Main class for Stripe API operations
+    GatewayDB - Main database model for Stripe entities
 
-    This class encapsulates all Stripe API operations including:
-    - Account and Balance management
-    - Coupon operations
-    - Customer management
-    - Dispute handling
-    - Invoice operations
-    - Payment Links
-    - PaymentIntents
-    - Price management
-    - Product catalog
-    - Refunds
-    - Subscription management
-    - Search and utility functions
+    This class serves as a Pydantic BaseModel container for all Stripe entities.
+    Each entity type is stored as a collection (dict keyed by ID).
 
-    All methods use Pydantic models for input validation and type safety.
+    Attributes:
+        account: The Stripe account entity
+        balance: The current balance entity
+        coupons: Collection of coupon entities
+        customers: Collection of customer entities
+        disputes: Collection of dispute entities
+        invoices: Collection of invoice entities
+        invoice_items: Collection of invoice item entities
+        payment_links: Collection of payment link entities
+        payment_intents: Collection of payment intent entities
+        prices: Collection of price entities
+        products: Collection of product entities
+        refunds: Collection of refund entities
+        subscriptions: Collection of subscription entities
     """
 
-    def __init__(self, config: GatewayDBConfig):
-        """
-        Initialize GatewayDB with Stripe configuration
-
-        Args:
-            config: GatewayDBConfig instance with API credentials
-        """
-        self.config = config
-        stripe.api_key = config.api_key
-        stripe.api_version = config.api_version
-        stripe.max_network_retries = config.max_network_retries
-        stripe.default_http_client = stripe.http_client.RequestsClient(timeout=config.timeout)
-
-    # ==================== Account Operations ====================
-
-    def get_stripe_account_info(self) -> stripe.Account:
-        """
-        Retrieves the details of the Stripe account
-
-        Returns:
-            stripe.Account: The account object
-        """
-        return stripe.Account.retrieve()
-
-    # ==================== Balance Operations ====================
-
-    def retrieve_balance(self) -> stripe.Balance:
-        """
-        Retrieves the current account balance
-
-        Returns:
-            stripe.Balance: The balance object
-        """
-        return stripe.Balance.retrieve()
-
-    # ==================== Coupon Operations ====================
-
-    def create_coupon(self, params: CreateCouponParams) -> stripe.Coupon:
-        """
-        Creates a new coupon object
-
-        Args:
-            params: CreateCouponParams with coupon details
-
-        Returns:
-            stripe.Coupon: The created coupon object
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Coupon.create(**data)
-
-    def list_coupons(self, params: ListCouponsParams = ListCouponsParams()) -> stripe.ListObject:
-        """
-        Returns a list of your coupons
-
-        Args:
-            params: ListCouponsParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of coupons
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Coupon.list(**data)
-
-    # ==================== Customer Operations ====================
-
-    def create_customer(self, params: CreateCustomerParams = CreateCustomerParams()) -> stripe.Customer:
-        """
-        Creates a new customer object
-
-        Args:
-            params: CreateCustomerParams with customer details
-
-        Returns:
-            stripe.Customer: The created customer object
-        """
-        data = params.model_dump(exclude_none=True)
-        # Convert nested Pydantic models to dicts
-        if 'address' in data and data['address']:
-            data['address'] = params.address.model_dump(exclude_none=True) if params.address else None
-        if 'shipping' in data and data['shipping']:
-            data['shipping'] = params.shipping.model_dump(exclude_none=True) if params.shipping else None
-        if 'invoice_settings' in data and data['invoice_settings']:
-            data['invoice_settings'] = params.invoice_settings.model_dump(exclude_none=True) if params.invoice_settings else None
-        if 'tax' in data and data['tax']:
-            data['tax'] = params.tax.model_dump(exclude_none=True) if params.tax else None
-
-        return stripe.Customer.create(**data)
-
-    def list_customers(self, params: ListCustomersParams = ListCustomersParams()) -> stripe.ListObject:
-        """
-        Returns a list of your customers
-
-        Args:
-            params: ListCustomersParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of customers
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Customer.list(**data)
-
-    # ==================== Dispute Operations ====================
-
-    def list_disputes(self, params: ListDisputesParams = ListDisputesParams()) -> stripe.ListObject:
-        """
-        Returns a list of your disputes
-
-        Args:
-            params: ListDisputesParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of disputes
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Dispute.list(**data)
-
-    def update_dispute(self, params: UpdateDisputeParams) -> stripe.Dispute:
-        """
-        Updates a specific dispute
-
-        Args:
-            params: UpdateDisputeParams with dispute update details
-
-        Returns:
-            stripe.Dispute: The updated dispute object
-        """
-        dispute_id = params.dispute_id
-        data = params.model_dump(exclude_none=True, exclude={'dispute_id'})
-
-        # Convert nested Pydantic models to dicts
-        if 'evidence' in data and data['evidence']:
-            data['evidence'] = params.evidence.model_dump(exclude_none=True) if params.evidence else None
-
-        return stripe.Dispute.modify(dispute_id, **data)
-
-    # ==================== Invoice Operations ====================
-
-    def create_invoice(self, params: CreateInvoiceParams) -> stripe.Invoice:
-        """
-        Creates a draft invoice for a given customer
-
-        Args:
-            params: CreateInvoiceParams with invoice details
-
-        Returns:
-            stripe.Invoice: The created invoice object
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Invoice.create(**data)
-
-    def create_invoice_item(self, params: CreateInvoiceItemParams) -> stripe.InvoiceItem:
-        """
-        Creates an invoice item
-
-        Args:
-            params: CreateInvoiceItemParams with invoice item details
-
-        Returns:
-            stripe.InvoiceItem: The created invoice item object
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.InvoiceItem.create(**data)
-
-    def finalize_invoice(self, params: FinalizeInvoiceParams) -> stripe.Invoice:
-        """
-        Finalizes a draft invoice
-
-        Args:
-            params: FinalizeInvoiceParams with finalization details
-
-        Returns:
-            stripe.Invoice: The finalized invoice object
-        """
-        invoice_id = params.invoice_id
-        data = params.model_dump(exclude_none=True, exclude={'invoice_id'})
-        return stripe.Invoice.finalize_invoice(invoice_id, **data)
-
-    def list_invoices(self, params: ListInvoicesParams = ListInvoicesParams()) -> stripe.ListObject:
-        """
-        Returns a list of your invoices
-
-        Args:
-            params: ListInvoicesParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of invoices
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Invoice.list(**data)
-
-    # ==================== Payment Link Operations ====================
-
-    def create_payment_link(self, params: CreatePaymentLinkParams) -> stripe.PaymentLink:
-        """
-        Creates a payment link
-
-        Args:
-            params: CreatePaymentLinkParams with payment link details
-
-        Returns:
-            stripe.PaymentLink: The created payment link object
-        """
-        data = params.model_dump(exclude_none=True)
-
-        # Convert line items
-        if 'line_items' in data:
-            data['line_items'] = [item.model_dump(exclude_none=True) if hasattr(item, 'model_dump') else item
-                                   for item in params.line_items]
-
-        # Convert nested models
-        if 'after_completion' in data and params.after_completion:
-            data['after_completion'] = params.after_completion.model_dump(exclude_none=True)
-
-        if 'automatic_tax' in data and params.automatic_tax:
-            data['automatic_tax'] = params.automatic_tax.model_dump(exclude_none=True)
-
-        return stripe.PaymentLink.create(**data)
-
-    # ==================== PaymentIntent Operations ====================
-
-    def list_payment_intents(self, params: ListPaymentIntentsParams = ListPaymentIntentsParams()) -> stripe.ListObject:
-        """
-        Returns a list of PaymentIntents
-
-        Args:
-            params: ListPaymentIntentsParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of PaymentIntents
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.PaymentIntent.list(**data)
-
-    # ==================== Price Operations ====================
-
-    def create_price(self, params: CreatePriceParams) -> stripe.Price:
-        """
-        Creates a new price for an existing product
-
-        Args:
-            params: CreatePriceParams with price details
-
-        Returns:
-            stripe.Price: The created price object
-        """
-        data = params.model_dump(exclude_none=True)
-
-        # Convert nested models
-        if 'recurring' in data and params.recurring:
-            data['recurring'] = params.recurring.model_dump(exclude_none=True)
-
-        if 'product_data' in data and params.product_data:
-            data['product_data'] = params.product_data.model_dump(exclude_none=True)
-
-        if 'tiers' in data and params.tiers:
-            data['tiers'] = [tier.model_dump(exclude_none=True) for tier in params.tiers]
-
-        return stripe.Price.create(**data)
-
-    def list_prices(self, params: ListPricesParams = ListPricesParams()) -> stripe.ListObject:
-        """
-        Returns a list of your prices
-
-        Args:
-            params: ListPricesParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of prices
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Price.list(**data)
-
-    # ==================== Product Operations ====================
-
-    def create_product(self, params: CreateProductParams) -> stripe.Product:
-        """
-        Creates a new product object
-
-        Args:
-            params: CreateProductParams with product details
-
-        Returns:
-            stripe.Product: The created product object
-        """
-        data = params.model_dump(exclude_none=True)
-
-        # Convert nested models
-        if 'default_price_data' in data and params.default_price_data:
-            data['default_price_data'] = params.default_price_data.model_dump(exclude_none=True)
-            if params.default_price_data.recurring:
-                data['default_price_data']['recurring'] = params.default_price_data.recurring.model_dump(exclude_none=True)
-
-        if 'features' in data and params.features:
-            data['features'] = [feature.model_dump(exclude_none=True) for feature in params.features]
-
-        if 'package_dimensions' in data and params.package_dimensions:
-            data['package_dimensions'] = params.package_dimensions.model_dump(exclude_none=True)
-
-        return stripe.Product.create(**data)
-
-    def list_products(self, params: ListProductsParams = ListProductsParams()) -> stripe.ListObject:
-        """
-        Returns a list of your products
-
-        Args:
-            params: ListProductsParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of products
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Product.list(**data)
-
-    # ==================== Refund Operations ====================
-
-    def create_refund(self, params: CreateRefundParams) -> stripe.Refund:
-        """
-        Creates a refund for a charge
-
-        Args:
-            params: CreateRefundParams with refund details
-
-        Returns:
-            stripe.Refund: The created refund object
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Refund.create(**data)
-
-    # ==================== Subscription Operations ====================
-
-    def cancel_subscription(self, params: CancelSubscriptionParams) -> stripe.Subscription:
-        """
-        Cancels a customer's subscription
-
-        Args:
-            params: CancelSubscriptionParams with cancellation details
-
-        Returns:
-            stripe.Subscription: The canceled subscription object
-        """
-        subscription_id = params.subscription_id
-        data = params.model_dump(exclude_none=True, exclude={'subscription_id'})
-
-        # Convert nested models
-        if 'cancellation_details' in data and params.cancellation_details:
-            data['cancellation_details'] = params.cancellation_details.model_dump(exclude_none=True)
-
-        return stripe.Subscription.delete(subscription_id, **data)
-
-    def list_subscriptions(self, params: ListSubscriptionsParams = ListSubscriptionsParams()) -> stripe.ListObject:
-        """
-        Returns a list of your subscriptions
-
-        Args:
-            params: ListSubscriptionsParams with filtering options
-
-        Returns:
-            stripe.ListObject: List of subscriptions
-        """
-        data = params.model_dump(exclude_none=True)
-        return stripe.Subscription.list(**data)
-
-    def update_subscription(self, params: UpdateSubscriptionParams) -> stripe.Subscription:
-        """
-        Updates an existing subscription
-
-        Args:
-            params: UpdateSubscriptionParams with update details
-
-        Returns:
-            stripe.Subscription: The updated subscription object
-        """
-        subscription_id = params.subscription_id
-        data = params.model_dump(exclude_none=True, exclude={'subscription_id'})
-
-        # Convert items list
-        if 'items' in data and params.items:
-            data['items'] = [item.model_dump(exclude_none=True) for item in params.items]
-
-        return stripe.Subscription.modify(subscription_id, **data)
-
-    # ==================== Search and Utility Operations ====================
-
-    def search_stripe_resources(self, params: SearchStripeResourcesParams) -> stripe.SearchResult:
-        """
-        Searches across Stripe resources using a query string
-
-        Args:
-            params: SearchStripeResourcesParams with search criteria
-
-        Returns:
-            stripe.SearchResult: Search results
-        """
-        resource_type = params.resource_type
-        data = params.model_dump(exclude_none=True, exclude={'resource_type'})
-
-        resource_map = {
-            "charges": stripe.Charge,
-            "customers": stripe.Customer,
-            "invoices": stripe.Invoice,
-            "payment_intents": stripe.PaymentIntent,
-            "prices": stripe.Price,
-            "products": stripe.Product,
-            "subscriptions": stripe.Subscription,
-        }
-
-        if resource_type not in resource_map:
-            raise ValueError(f"Unsupported resource type: {resource_type}")
-
-        return resource_map[resource_type].search(**data)
-
-    def fetch_stripe_resource(self, params: FetchStripeResourceParams) -> Any:
-        """
-        Fetches a specific Stripe resource by ID
-
-        Args:
-            params: FetchStripeResourceParams with resource details
-
-        Returns:
-            Stripe object: The requested resource
-        """
-        resource_type = params.resource_type
-        resource_id = params.resource_id
-
-        resource_map = {
-            "accounts": stripe.Account,
-            "charges": stripe.Charge,
-            "customers": stripe.Customer,
-            "invoices": stripe.Invoice,
-            "payment_intents": stripe.PaymentIntent,
-            "payment_methods": stripe.PaymentMethod,
-            "prices": stripe.Price,
-            "products": stripe.Product,
-            "refunds": stripe.Refund,
-            "disputes": stripe.Dispute,
-            "coupons": stripe.Coupon,
-            "subscriptions": stripe.Subscription,
-        }
-
-        if resource_type == "balances":
-            return stripe.Balance.retrieve()
-
-        if resource_type not in resource_map:
-            raise ValueError(f"Unsupported resource type: {resource_type}")
-
-        return resource_map[resource_type].retrieve(resource_id)
-
-    def search_stripe_documentation(self, params: SearchStripeDocumentationParams) -> Dict[str, Any]:
-        """
-        Searches Stripe documentation
-
-        Note: This is a placeholder for integration with Stripe's documentation API
-        or a custom search service.
-
-        Args:
-            params: SearchStripeDocumentationParams with search criteria
-
-        Returns:
-            Dict: Search results structure
-        """
-        data = params.model_dump()
-        return {
-            "query": data["query"],
-            "category": data["category"],
-            "limit": data["limit"],
-            "results": [],
-            "message": "Documentation search requires integration with Stripe Docs API or custom search service",
-        }
+    # Account and Balance (singular)
+    account: Optional[AccountEntity] = Field(
+        None,
+        description="The Stripe account entity"
+    )
+    balance: Optional[BalanceEntity] = Field(
+        None,
+        description="Current account balance"
+    )
+
+    # Collections of entities (keyed by ID)
+    coupons: Dict[str, CouponEntity] = Field(
+        default_factory=dict,
+        description="Collection of coupon entities keyed by coupon ID"
+    )
+    customers: Dict[str, CustomerEntity] = Field(
+        default_factory=dict,
+        description="Collection of customer entities keyed by customer ID"
+    )
+    disputes: Dict[str, DisputeEntity] = Field(
+        default_factory=dict,
+        description="Collection of dispute entities keyed by dispute ID"
+    )
+    invoices: Dict[str, InvoiceEntity] = Field(
+        default_factory=dict,
+        description="Collection of invoice entities keyed by invoice ID"
+    )
+    invoice_items: Dict[str, InvoiceItemEntity] = Field(
+        default_factory=dict,
+        description="Collection of invoice item entities keyed by item ID"
+    )
+    payment_links: Dict[str, PaymentLinkEntity] = Field(
+        default_factory=dict,
+        description="Collection of payment link entities keyed by link ID"
+    )
+    payment_intents: Dict[str, PaymentIntentEntity] = Field(
+        default_factory=dict,
+        description="Collection of payment intent entities keyed by intent ID"
+    )
+    prices: Dict[str, PriceEntity] = Field(
+        default_factory=dict,
+        description="Collection of price entities keyed by price ID"
+    )
+    products: Dict[str, ProductEntity] = Field(
+        default_factory=dict,
+        description="Collection of product entities keyed by product ID"
+    )
+    refunds: Dict[str, RefundEntity] = Field(
+        default_factory=dict,
+        description="Collection of refund entities keyed by refund ID"
+    )
+    subscriptions: Dict[str, SubscriptionEntity] = Field(
+        default_factory=dict,
+        description="Collection of subscription entities keyed by subscription ID"
+    )
+
+    # Metadata for the database
+    api_version: Optional[str] = Field(
+        "2023-10-16",
+        description="Stripe API version"
+    )
+    livemode: bool = Field(
+        False,
+        description="Whether this database contains live or test data"
+    )
+    last_sync: Optional[int] = Field(
+        None,
+        description="Unix timestamp of last sync with Stripe"
+    )
+
+    model_config = ConfigDict(
+        extra='allow',
+        validate_assignment=True,
+        use_enum_values=True
+    )
 
     # ==================== Helper Methods ====================
 
-    def test_connection(self) -> bool:
-        """
-        Tests the API connection
+    def add_account(self, account: AccountEntity) -> None:
+        """Add or update the account entity"""
+        self.account = account
 
-        Returns:
-            bool: True if connection is successful
-        """
-        try:
-            stripe.Balance.retrieve()
+    def add_balance(self, balance: BalanceEntity) -> None:
+        """Add or update the balance entity"""
+        self.balance = balance
+
+    def add_coupon(self, coupon: CouponEntity) -> None:
+        """Add a coupon to the collection"""
+        self.coupons[coupon.id] = coupon
+
+    def get_coupon(self, coupon_id: str) -> Optional[CouponEntity]:
+        """Get a coupon by ID"""
+        return self.coupons.get(coupon_id)
+
+    def add_customer(self, customer: CustomerEntity) -> None:
+        """Add a customer to the collection"""
+        self.customers[customer.id] = customer
+
+    def get_customer(self, customer_id: str) -> Optional[CustomerEntity]:
+        """Get a customer by ID"""
+        return self.customers.get(customer_id)
+
+    def add_dispute(self, dispute: DisputeEntity) -> None:
+        """Add a dispute to the collection"""
+        self.disputes[dispute.id] = dispute
+
+    def get_dispute(self, dispute_id: str) -> Optional[DisputeEntity]:
+        """Get a dispute by ID"""
+        return self.disputes.get(dispute_id)
+
+    def add_invoice(self, invoice: InvoiceEntity) -> None:
+        """Add an invoice to the collection"""
+        self.invoices[invoice.id] = invoice
+
+    def get_invoice(self, invoice_id: str) -> Optional[InvoiceEntity]:
+        """Get an invoice by ID"""
+        return self.invoices.get(invoice_id)
+
+    def add_invoice_item(self, item: InvoiceItemEntity) -> None:
+        """Add an invoice item to the collection"""
+        self.invoice_items[item.id] = item
+
+    def get_invoice_item(self, item_id: str) -> Optional[InvoiceItemEntity]:
+        """Get an invoice item by ID"""
+        return self.invoice_items.get(item_id)
+
+    def add_payment_link(self, link: PaymentLinkEntity) -> None:
+        """Add a payment link to the collection"""
+        self.payment_links[link.id] = link
+
+    def get_payment_link(self, link_id: str) -> Optional[PaymentLinkEntity]:
+        """Get a payment link by ID"""
+        return self.payment_links.get(link_id)
+
+    def add_payment_intent(self, intent: PaymentIntentEntity) -> None:
+        """Add a payment intent to the collection"""
+        self.payment_intents[intent.id] = intent
+
+    def get_payment_intent(self, intent_id: str) -> Optional[PaymentIntentEntity]:
+        """Get a payment intent by ID"""
+        return self.payment_intents.get(intent_id)
+
+    def add_price(self, price: PriceEntity) -> None:
+        """Add a price to the collection"""
+        self.prices[price.id] = price
+
+    def get_price(self, price_id: str) -> Optional[PriceEntity]:
+        """Get a price by ID"""
+        return self.prices.get(price_id)
+
+    def add_product(self, product: ProductEntity) -> None:
+        """Add a product to the collection"""
+        self.products[product.id] = product
+
+    def get_product(self, product_id: str) -> Optional[ProductEntity]:
+        """Get a product by ID"""
+        return self.products.get(product_id)
+
+    def add_refund(self, refund: RefundEntity) -> None:
+        """Add a refund to the collection"""
+        self.refunds[refund.id] = refund
+
+    def get_refund(self, refund_id: str) -> Optional[RefundEntity]:
+        """Get a refund by ID"""
+        return self.refunds.get(refund_id)
+
+    def add_subscription(self, subscription: SubscriptionEntity) -> None:
+        """Add a subscription to the collection"""
+        self.subscriptions[subscription.id] = subscription
+
+    def get_subscription(self, subscription_id: str) -> Optional[SubscriptionEntity]:
+        """Get a subscription by ID"""
+        return self.subscriptions.get(subscription_id)
+
+    def remove_coupon(self, coupon_id: str) -> bool:
+        """Remove a coupon from the collection"""
+        if coupon_id in self.coupons:
+            del self.coupons[coupon_id]
             return True
-        except Exception as e:
-            print(f"Stripe connection test failed: {e}")
-            return False
+        return False
 
-    def get_config(self) -> Dict[str, Any]:
-        """
-        Gets API configuration (with redacted API key)
+    def remove_customer(self, customer_id: str) -> bool:
+        """Remove a customer from the collection"""
+        if customer_id in self.customers:
+            del self.customers[customer_id]
+            return True
+        return False
 
-        Returns:
-            Dict: Configuration dictionary
-        """
+    def remove_subscription(self, subscription_id: str) -> bool:
+        """Remove a subscription from the collection"""
+        if subscription_id in self.subscriptions:
+            del self.subscriptions[subscription_id]
+            return True
+        return False
+
+    # ==================== Query Methods ====================
+
+    def list_all_coupons(self) -> List[CouponEntity]:
+        """Get all coupons"""
+        return list(self.coupons.values())
+
+    def list_all_customers(self) -> List[CustomerEntity]:
+        """Get all customers"""
+        return list(self.customers.values())
+
+    def list_all_invoices(self) -> List[InvoiceEntity]:
+        """Get all invoices"""
+        return list(self.invoices.values())
+
+    def list_all_products(self) -> List[ProductEntity]:
+        """Get all products"""
+        return list(self.products.values())
+
+    def list_all_prices(self) -> List[PriceEntity]:
+        """Get all prices"""
+        return list(self.prices.values())
+
+    def list_all_subscriptions(self) -> List[SubscriptionEntity]:
+        """Get all subscriptions"""
+        return list(self.subscriptions.values())
+
+    def find_customers_by_email(self, email: str) -> List[CustomerEntity]:
+        """Find customers by email"""
+        return [c for c in self.customers.values() if c.email == email]
+
+    def find_active_subscriptions(self) -> List[SubscriptionEntity]:
+        """Find all active subscriptions"""
+        return [s for s in self.subscriptions.values() if s.status == "active"]
+
+    def find_invoices_by_customer(self, customer_id: str) -> List[InvoiceEntity]:
+        """Find all invoices for a specific customer"""
+        return [i for i in self.invoices.values() if i.customer == customer_id]
+
+    def find_products_by_active_status(self, active: bool) -> List[ProductEntity]:
+        """Find products by active status"""
+        return [p for p in self.products.values() if p.active == active]
+
+    # ==================== Statistics ====================
+
+    def get_stats(self) -> Dict[str, int]:
+        """Get statistics about the database"""
         return {
-            "api_key": "***REDACTED***",
-            "api_version": self.config.api_version,
-            "timeout": self.config.timeout,
-            "max_network_retries": self.config.max_network_retries,
+            "total_coupons": len(self.coupons),
+            "total_customers": len(self.customers),
+            "total_disputes": len(self.disputes),
+            "total_invoices": len(self.invoices),
+            "total_invoice_items": len(self.invoice_items),
+            "total_payment_links": len(self.payment_links),
+            "total_payment_intents": len(self.payment_intents),
+            "total_prices": len(self.prices),
+            "total_products": len(self.products),
+            "total_refunds": len(self.refunds),
+            "total_subscriptions": len(self.subscriptions),
         }
+
+    def clear_all(self) -> None:
+        """Clear all collections"""
+        self.account = None
+        self.balance = None
+        self.coupons.clear()
+        self.customers.clear()
+        self.disputes.clear()
+        self.invoices.clear()
+        self.invoice_items.clear()
+        self.payment_links.clear()
+        self.payment_intents.clear()
+        self.prices.clear()
+        self.products.clear()
+        self.refunds.clear()
+        self.subscriptions.clear()
