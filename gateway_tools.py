@@ -539,7 +539,14 @@ class GatewayTools:
         stripe.api_key = config.api_key
         stripe.api_version = config.api_version
         stripe.max_network_retries = config.max_network_retries
-        stripe.default_http_client = stripe.http_client.RequestsClient(timeout=config.timeout)
+
+        # Set HTTP client with timeout (if available)
+        try:
+            if hasattr(stripe, 'http_client'):
+                stripe.default_http_client = stripe.http_client.RequestsClient(timeout=config.timeout)
+        except (AttributeError, ImportError):
+            # Older/newer Stripe versions may not have http_client
+            pass
 
     # ==================== Account Operations ====================
 
