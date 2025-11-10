@@ -1,15 +1,22 @@
 """
-GatewayTools - MCP tool implementations for Stripe API operations
+GatewayTools - Stripe Simulation Layer
 
-This module contains:
+This module simulates Stripe API behavior without external API calls.
+Contains:
 1. All parameter models (CreateCustomerParams, ListInvoicesParams, etc.)
-2. GatewayTools class - the main tools class with all 25 MCP implementations
+2. GatewayTools class - simulation of all 25 Stripe operations
 """
 
 from typing import Any, Dict, Optional, List, Union, Literal
 from pydantic import BaseModel, Field, ConfigDict
-import stripe
 import time
+from simulation_utils import (
+    StripeIDGenerator,
+    current_timestamp,
+    simulate_api_delay,
+    calculate_invoice_total,
+    apply_coupon_discount
+)
 from gateway_db import (
     GatewayDB,
     AccountEntity,
@@ -52,16 +59,7 @@ class DateRangeFilter(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-class Address(BaseModel):
-    """Address model"""
-    line1: Optional[str] = Field(None, description="Address line 1")
-    line2: Optional[str] = Field(None, description="Address line 2")
-    city: Optional[str] = Field(None, description="City")
-    state: Optional[str] = Field(None, description="State/Province")
-    postal_code: Optional[str] = Field(None, description="Postal code")
-    country: Optional[str] = Field(None, description="Two-letter country code")
-
-    model_config = ConfigDict(extra='forbid')
+# Note: Address is imported from gateway_db, not defined here
 
 
 # ==================== Coupon Models ====================
@@ -517,38 +515,41 @@ class GatewayDBConfig(BaseModel):
 
 class GatewayTools:
     """
-    GatewayTools - MCP tool implementations for Stripe API
+    GatewayTools - Stripe API Simulation Layer
 
-    This class implements all 25 Stripe MCP tools and manages
-    the GatewayDB entity database.
+    This class simulates all 25 Stripe operations locally without
+    external API calls. All operations generate realistic Stripe-like
+    responses and store entities in GatewayDB.
 
-    All operations:
-    1. Call Stripe API
-    2. Convert response to entity model
+    Simulation operations:
+    1. Generate Stripe-like IDs and timestamps
+    2. Create entity from parameters
     3. Store entity in GatewayDB
     4. Return the entity
 
     Attributes:
-        db: GatewayDB instance containing all entities
-        config: Configuration for Stripe API
+        db: GatewayDB instance containing all simulated entities
+        config: Configuration (for compatibility, not used in simulation)
+        simulate_delays: Whether to simulate network delays (default: False)
     """
 
-    def __init__(self, config: GatewayDBConfig, db: GatewayDB = None):
+    def __init__(self, config: GatewayDBConfig = None, db: GatewayDB = None, simulate_delays: bool = False):
         """
-        Initialize GatewayTools with Stripe configuration
+        Initialize GatewayTools simulation layer
 
         Args:
-            config: GatewayDBConfig instance with API credentials
+            config: Optional GatewayDBConfig for compatibility (not required for simulation)
             db: Optional GatewayDB instance (creates new one if not provided)
+            simulate_delays: Whether to simulate API network delays
         """
-        self.config = config
+        self.config = config or GatewayDBConfig(
+            api_key="sim_test_key",
+            api_version="2023-10-16",
+            timeout=80,
+            max_network_retries=3
+        )
         self.db = db if db is not None else GatewayDB()
-
-        # Configure Stripe
-        stripe.api_key = config.api_key
-        stripe.api_version = config.api_version
-        stripe.max_network_retries = config.max_network_retries
-        stripe.default_http_client = stripe.http_client.RequestsClient(timeout=config.timeout)
+        self.simulate_delays = simulate_delays
 
     # ==================== Account Operations ====================
 
@@ -559,7 +560,22 @@ class GatewayTools:
         Returns:
             AccountEntity: The account entity
         """
-        account = stripe.Account.retrieve()
+        account_data = {
+            'id': 'acct_' + StripeIDGenerator.generate('account', 16),
+            'object': 'account',
+            'business_type': 'company',
+            'charges_enabled': True,
+            'country': 'US',
+            'created': current_timestamp(),
+            'default_currency': 'usd',
+            'details_submitted': True,
+            'email': 'simulated@example.com',
+            'payouts_enabled': True,
+            'type': 'standard',
+            'livemode': self.db.livemode,
+            'metadata': {}
+        }
+        account = account_data
         entity = AccountEntity(**account)
         self.db.add_account(entity)
         self._update_sync_time()
@@ -574,7 +590,13 @@ class GatewayTools:
         Returns:
             BalanceEntity: The balance entity
         """
-        balance = stripe.Balance.retrieve()
+        balance_data = {
+            'object': 'balance',
+            'available': [{'amount': 0, 'currency': 'usd'}],
+            'pending': [{'amount': 0, 'currency': 'usd'}],
+            'livemode': self.db.livemode
+        }
+        balance = balance_data
         entity = BalanceEntity(**balance)
         self.db.add_balance(entity)
         self._update_sync_time()
@@ -593,7 +615,16 @@ class GatewayTools:
             CouponEntity: The created coupon entity
         """
         data = params.model_dump(exclude_none=True)
-        coupon = stripe.Coupon.create(**data)
+        coupon_data = {
+            'id': params.id or StripeIDGenerator.coupon(),
+            'object': 'coupon',
+            'created': current_timestamp(),
+            'livemode': self.db.livemode,
+            'times_redeemed': 0,
+            'valid': True,
+            **data
+        }
+        coupon = coupon_data
         entity = CouponEntity(**coupon)
         self.db.add_coupon(entity)
         self._update_sync_time()
@@ -610,7 +641,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Coupon.list(**data)
+        coupons = list(self.db.coupons.values())
+        response = {'data': coupons, 'has_more': False, 'url': '/v1/coupons'}
 
         # Store all coupons in DB
         for coupon_data in response.data:
@@ -630,7 +662,7 @@ class GatewayTools:
 
     def create_customer(self, params: CreateCustomerParams = CreateCustomerParams()) -> CustomerEntity:
         """
-        Creates a new customer object
+        Simulates creating a new customer object
 
         Args:
             params: CreateCustomerParams with customer details
@@ -638,19 +670,19 @@ class GatewayTools:
         Returns:
             CustomerEntity: The created customer entity
         """
-        data = params.model_dump(exclude_none=True)
-        # Convert nested Pydantic models to dicts
-        if 'address' in data and params.address:
-            data['address'] = params.address.model_dump(exclude_none=True)
-        if 'shipping' in data and params.shipping:
-            data['shipping'] = params.shipping.model_dump(exclude_none=True)
-        if 'invoice_settings' in data and params.invoice_settings:
-            data['invoice_settings'] = params.invoice_settings.model_dump(exclude_none=True)
-        if 'tax' in data and params.tax:
-            data['tax'] = params.tax.model_dump(exclude_none=True)
+        if self.simulate_delays:
+            simulate_api_delay()
 
-        customer = stripe.Customer.create(**data)
-        entity = CustomerEntity(**customer)
+        # Generate simulated customer data
+        customer_data = {
+            'id': StripeIDGenerator.customer(),
+            'object': 'customer',
+            'created': current_timestamp(),
+            'livemode': self.db.livemode,
+            **params.model_dump(exclude_none=True)
+        }
+
+        entity = CustomerEntity(**customer_data)
         self.db.add_customer(entity)
         self._update_sync_time()
         return entity
@@ -666,7 +698,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Customer.list(**data)
+        customers = list(self.db.customers.values())
+        response = {'data': customers, 'has_more': False, 'url': '/v1/customers'}
 
         # Store all customers in DB
         for customer_data in response.data:
@@ -695,7 +728,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Dispute.list(**data)
+        disputes = list(self.db.disputes.values())
+        response = {'data': disputes, 'has_more': False, 'url': '/v1/disputes'}
 
         # Store all disputes in DB
         for dispute_data in response.data:
@@ -728,7 +762,12 @@ class GatewayTools:
         if 'evidence' in data and params.evidence:
             data['evidence'] = params.evidence.model_dump(exclude_none=True)
 
-        dispute = stripe.Dispute.modify(dispute_id, **data)
+        dispute = self.db.get_dispute(dispute_id)
+        if dispute:
+            for key, value in data.items():
+                setattr(dispute, key, value)
+        else:
+            raise ValueError(f"Dispute {dispute_id} not found")
         entity = DisputeEntity(**dispute)
         self.db.add_dispute(entity)
         self._update_sync_time()
@@ -747,7 +786,23 @@ class GatewayTools:
             InvoiceEntity: The created invoice entity
         """
         data = params.model_dump(exclude_none=True)
-        invoice = stripe.Invoice.create(**data)
+        invoice_data = {
+            'id': StripeIDGenerator.invoice(),
+            'object': 'invoice',
+            'amount_due': 0,
+            'amount_paid': 0,
+            'amount_remaining': 0,
+            'attempt_count': 0,
+            'attempted': False,
+            'collection_method': 'charge_automatically',
+            'created': current_timestamp(),
+            'livemode': self.db.livemode,
+            'paid': False,
+            'subtotal': 0,
+            'total': 0,
+            **data
+        }
+        invoice = invoice_data
         entity = InvoiceEntity(**invoice)
         self.db.add_invoice(entity)
         self._update_sync_time()
@@ -764,7 +819,15 @@ class GatewayTools:
             InvoiceItemEntity: The created invoice item entity
         """
         data = params.model_dump(exclude_none=True)
-        item = stripe.InvoiceItem.create(**data)
+        item_data = {
+            'id': StripeIDGenerator.invoice_item(),
+            'object': 'invoiceitem',
+            'date': current_timestamp(),
+            'livemode': self.db.livemode,
+            'proration': False,
+            **data
+        }
+        item = item_data
         entity = InvoiceItemEntity(**item)
         self.db.add_invoice_item(entity)
         self._update_sync_time()
@@ -782,7 +845,12 @@ class GatewayTools:
         """
         invoice_id = params.invoice_id
         data = params.model_dump(exclude_none=True, exclude={'invoice_id'})
-        invoice = stripe.Invoice.finalize_invoice(invoice_id, **data)
+        invoice = self.db.get_invoice(invoice_id)
+        if invoice:
+            invoice.status = 'open'
+            invoice.attempted = True
+        else:
+            raise ValueError(f"Invoice {invoice_id} not found")
         entity = InvoiceEntity(**invoice)
         self.db.add_invoice(entity)
         self._update_sync_time()
@@ -799,7 +867,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Invoice.list(**data)
+        invoices = list(self.db.invoices.values())
+        response = {'data': invoices, 'has_more': False, 'url': '/v1/invoices'}
 
         # Store all invoices in DB
         for invoice_data in response.data:
@@ -841,7 +910,15 @@ class GatewayTools:
         if 'automatic_tax' in data and params.automatic_tax:
             data['automatic_tax'] = params.automatic_tax.model_dump(exclude_none=True)
 
-        link = stripe.PaymentLink.create(**data)
+        link_data = {
+            'id': StripeIDGenerator.payment_link(),
+            'object': 'payment_link',
+            'active': True,
+            'url': f'https://simulated.stripe.com/pay/{StripeIDGenerator.generate("link", 16)}',
+            'livemode': self.db.livemode,
+            **data
+        }
+        link = link_data
         entity = PaymentLinkEntity(**link)
         self.db.add_payment_link(entity)
         self._update_sync_time()
@@ -860,7 +937,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.PaymentIntent.list(**data)
+        payment_intents = list(self.db.payment_intents.values())
+        response = {'data': payment_intents, 'has_more': False, 'url': '/v1/payment_intents'}
 
         # Store all payment intents in DB
         for intent_data in response.data:
@@ -900,7 +978,17 @@ class GatewayTools:
         if 'tiers' in data and params.tiers:
             data['tiers'] = [tier.model_dump(exclude_none=True) for tier in params.tiers]
 
-        price = stripe.Price.create(**data)
+        price_data = {
+            'id': StripeIDGenerator.price(),
+            'object': 'price',
+            'active': True,
+            'billing_scheme': 'per_unit',
+            'created': current_timestamp(),
+            'livemode': self.db.livemode,
+            'type': 'one_time',
+            **data
+        }
+        price = price_data
         entity = PriceEntity(**price)
         self.db.add_price(entity)
         self._update_sync_time()
@@ -917,7 +1005,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Price.list(**data)
+        prices = list(self.db.prices.values())
+        response = {'data': prices, 'has_more': False, 'url': '/v1/prices'}
 
         # Store all prices in DB
         for price_data in response.data:
@@ -959,7 +1048,18 @@ class GatewayTools:
         if 'package_dimensions' in data and params.package_dimensions:
             data['package_dimensions'] = params.package_dimensions.model_dump(exclude_none=True)
 
-        product = stripe.Product.create(**data)
+        product_data = {
+            'id': StripeIDGenerator.product(),
+            'object': 'product',
+            'active': True,
+            'created': current_timestamp(),
+            'updated': current_timestamp(),
+            'livemode': self.db.livemode,
+            'images': [],
+            'type': 'good',
+            **data
+        }
+        product = product_data
         entity = ProductEntity(**product)
         self.db.add_product(entity)
         self._update_sync_time()
@@ -976,7 +1076,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Product.list(**data)
+        products = list(self.db.products.values())
+        response = {'data': products, 'has_more': False, 'url': '/v1/products'}
 
         # Store all products in DB
         for product_data in response.data:
@@ -1005,7 +1106,15 @@ class GatewayTools:
             RefundEntity: The created refund entity
         """
         data = params.model_dump(exclude_none=True)
-        refund = stripe.Refund.create(**data)
+        refund_data = {
+            'id': StripeIDGenerator.refund(),
+            'object': 'refund',
+            'created': current_timestamp(),
+            'livemode': self.db.livemode,
+            'status': 'succeeded',
+            **data
+        }
+        refund = refund_data
         entity = RefundEntity(**refund)
         self.db.add_refund(entity)
         self._update_sync_time()
@@ -1030,7 +1139,11 @@ class GatewayTools:
         if 'cancellation_details' in data and params.cancellation_details:
             data['cancellation_details'] = params.cancellation_details.model_dump(exclude_none=True)
 
-        subscription = stripe.Subscription.delete(subscription_id, **data)
+        subscription = self.db.get_subscription(subscription_id)
+        if subscription:
+            subscription.status = 'canceled'
+        else:
+            raise ValueError(f"Subscription {subscription_id} not found")
         entity = SubscriptionEntity(**subscription)
 
         # Remove from DB if fully canceled
@@ -1053,7 +1166,8 @@ class GatewayTools:
             Dict: Response with data array and metadata
         """
         data = params.model_dump(exclude_none=True)
-        response = stripe.Subscription.list(**data)
+        subscriptions = list(self.db.subscriptions.values())
+        response = {'data': subscriptions, 'has_more': False, 'url': '/v1/subscriptions'}
 
         # Store all subscriptions in DB
         for subscription_data in response.data:
@@ -1086,17 +1200,24 @@ class GatewayTools:
         if 'items' in data and params.items:
             data['items'] = [item.model_dump(exclude_none=True) for item in params.items]
 
-        subscription = stripe.Subscription.modify(subscription_id, **data)
-        entity = SubscriptionEntity(**subscription)
-        self.db.add_subscription(entity)
+        # Get existing subscription and update it
+        subscription = self.db.get_subscription(subscription_id)
+        if not subscription:
+            raise ValueError(f"Subscription {subscription_id} not found")
+
+        # Update subscription fields
+        for key, value in data.items():
+            setattr(subscription, key, value)
+
+        self.db.add_subscription(subscription)
         self._update_sync_time()
-        return entity
+        return subscription
 
     # ==================== Search and Utility Operations ====================
 
     def search_stripe_resources(self, params: SearchStripeResourcesParams) -> Dict[str, Any]:
         """
-        Searches across Stripe resources using a query string
+        Simulates searching across Stripe resources using a query string
 
         Args:
             params: SearchStripeResourcesParams with search criteria
@@ -1105,34 +1226,36 @@ class GatewayTools:
             Dict: Search results with metadata
         """
         resource_type = params.resource_type
-        data = params.model_dump(exclude_none=True, exclude={'resource_type'})
+        query = params.query
 
+        # Map resource types to DB collections
         resource_map = {
-            "charges": stripe.Charge,
-            "customers": stripe.Customer,
-            "invoices": stripe.Invoice,
-            "payment_intents": stripe.PaymentIntent,
-            "prices": stripe.Price,
-            "products": stripe.Product,
-            "subscriptions": stripe.Subscription,
+            "customers": self.db.customers,
+            "invoices": self.db.invoices,
+            "payment_intents": self.db.payment_intents,
+            "prices": self.db.prices,
+            "products": self.db.products,
+            "subscriptions": self.db.subscriptions,
         }
 
         if resource_type not in resource_map:
             raise ValueError(f"Unsupported resource type: {resource_type}")
 
-        response = resource_map[resource_type].search(**data)
+        # Simple simulation: return all resources of that type
+        # In real implementation, would parse query and filter
+        results = list(resource_map[resource_type].values())
 
         return {
             "object": "search_result",
-            "data": response.data,
-            "has_more": response.has_more,
-            "total_count": getattr(response, 'total_count', None),
-            "url": response.url,
+            "data": results,
+            "has_more": False,
+            "total_count": len(results),
+            "url": f"/v1/{resource_type}/search",
         }
 
     def fetch_stripe_resource(self, params: FetchStripeResourceParams) -> Any:
         """
-        Fetches a specific Stripe resource by ID
+        Fetches a specific Stripe resource by ID from simulation
 
         Args:
             params: FetchStripeResourceParams with resource details
@@ -1143,17 +1266,18 @@ class GatewayTools:
         resource_type = params.resource_type
         resource_id = params.resource_id
 
+        # Map resource types to getter methods
         resource_map = {
-            "accounts": (stripe.Account, AccountEntity, self.db.add_account),
-            "customers": (stripe.Customer, CustomerEntity, self.db.add_customer),
-            "invoices": (stripe.Invoice, InvoiceEntity, self.db.add_invoice),
-            "payment_intents": (stripe.PaymentIntent, PaymentIntentEntity, self.db.add_payment_intent),
-            "prices": (stripe.Price, PriceEntity, self.db.add_price),
-            "products": (stripe.Product, ProductEntity, self.db.add_product),
-            "refunds": (stripe.Refund, RefundEntity, self.db.add_refund),
-            "disputes": (stripe.Dispute, DisputeEntity, self.db.add_dispute),
-            "coupons": (stripe.Coupon, CouponEntity, self.db.add_coupon),
-            "subscriptions": (stripe.Subscription, SubscriptionEntity, self.db.add_subscription),
+            "accounts": lambda id: self.db.account if self.db.account and self.db.account.id == id else None,
+            "customers": self.db.get_customer,
+            "invoices": self.db.get_invoice,
+            "payment_intents": self.db.get_payment_intent,
+            "prices": self.db.get_price,
+            "products": self.db.get_product,
+            "refunds": self.db.get_refund,
+            "disputes": self.db.get_dispute,
+            "coupons": self.db.get_coupon,
+            "subscriptions": self.db.get_subscription,
         }
 
         if resource_type == "balances":
@@ -1162,11 +1286,10 @@ class GatewayTools:
         if resource_type not in resource_map:
             raise ValueError(f"Unsupported resource type: {resource_type}")
 
-        stripe_class, entity_class, add_method = resource_map[resource_type]
-        response = stripe_class.retrieve(resource_id)
-        entity = entity_class(**response)
-        add_method(entity)
-        self._update_sync_time()
+        entity = resource_map[resource_type](resource_id)
+        if not entity:
+            raise ValueError(f"{resource_type.capitalize()} {resource_id} not found")
+
         return entity
 
     def search_stripe_documentation(self, params: SearchStripeDocumentationParams) -> Dict[str, Any]:
@@ -1199,16 +1322,17 @@ class GatewayTools:
 
     def test_connection(self) -> bool:
         """
-        Tests the API connection
+        Tests the simulation (always returns True for simulation)
 
         Returns:
-            bool: True if connection is successful
+            bool: True if simulation is working
         """
         try:
-            stripe.Balance.retrieve()
+            # In simulation mode, just check if DB is accessible
+            _ = self.db.get_stats()
             return True
         except Exception as e:
-            print(f"Stripe connection test failed: {e}")
+            print(f"Simulation test failed: {e}")
             return False
 
     def get_config(self) -> Dict[str, Any]:

@@ -9,6 +9,8 @@ This module contains:
 
 from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
+import json
+from pathlib import Path
 
 
 # ==================== Common Entity Models ====================
@@ -581,3 +583,70 @@ class GatewayDB(BaseModel):
         self.products.clear()
         self.refunds.clear()
         self.subscriptions.clear()
+
+    # ==================== Persistence Methods ====================
+
+    def save_to_json(self, file_path: str) -> None:
+        """
+        Save the database to a JSON file
+
+        Args:
+            file_path: Path to the JSON file to save to
+
+        Example:
+            db.save_to_json("stripe_data.json")
+        """
+        path = Path(file_path)
+        data = self.model_dump(mode='json')
+
+        with path.open('w') as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, file_path: str) -> 'GatewayDB':
+        """
+        Load database from a JSON file
+
+        Args:
+            file_path: Path to the JSON file to load from
+
+        Returns:
+            GatewayDB: A new GatewayDB instance with loaded data
+
+        Example:
+            db = GatewayDB.load_from_json("stripe_data.json")
+        """
+        path = Path(file_path)
+
+        with path.open('r') as f:
+            data = json.load(f)
+
+        return cls(**data)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the database to a dictionary
+
+        Returns:
+            Dict: Dictionary representation of the database
+
+        Example:
+            data = db.to_dict()
+        """
+        return self.model_dump(mode='json')
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'GatewayDB':
+        """
+        Create database from a dictionary
+
+        Args:
+            data: Dictionary with database data
+
+        Returns:
+            GatewayDB: A new GatewayDB instance
+
+        Example:
+            db = GatewayDB.from_dict(data_dict)
+        """
+        return cls(**data)
