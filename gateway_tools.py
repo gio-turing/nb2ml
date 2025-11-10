@@ -52,16 +52,7 @@ class DateRangeFilter(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-class Address(BaseModel):
-    """Address model"""
-    line1: Optional[str] = Field(None, description="Address line 1")
-    line2: Optional[str] = Field(None, description="Address line 2")
-    city: Optional[str] = Field(None, description="City")
-    state: Optional[str] = Field(None, description="State/Province")
-    postal_code: Optional[str] = Field(None, description="Postal code")
-    country: Optional[str] = Field(None, description="Two-letter country code")
-
-    model_config = ConfigDict(extra='forbid')
+# Note: Address is imported from gateway_db, not defined here
 
 
 # ==================== Coupon Models ====================
